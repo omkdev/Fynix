@@ -4,11 +4,52 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
-const { BadRequestException, UnauthorizedException } = require('@nestjs/common');
+const {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} = require('@nestjs/common');
 
 const prisma = new PrismaClient();
 
 class AuthService {
+  async register({ name, email, password }) {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const normalizedName = (name || '').trim();
+
+    if (!normalizedEmail || !password) {
+      throw new BadRequestException('Email and password are required.');
+    }
+
+    if (password.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long.');
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+    if (existingUser) {
+      throw new ConflictException('Account already exists for this email.');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const createdUser = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        passwordHash,
+        name: normalizedName || null,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
+    });
+
+    return this.createAuthResponse(createdUser);
+  }
+
   async login(email, password) {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail || !password) {
@@ -34,26 +75,7 @@ class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    const tokenPayload = { sub: user.id, email: user.email };
-
-    const accessToken = jwt.sign(tokenPayload, this.getJwtAccessSecret(), {
-      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
-    });
-
-    const refreshToken = jwt.sign(tokenPayload, this.getJwtRefreshSecret(), {
-      expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d',
-    });
-
-    return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
-    };
+    return this.createAuthResponse(user);
   }
 
   async sendMagicLink(email) {
@@ -115,48 +137,121 @@ class AuthService {
     };
   }
 
+  async verifyMagicLink(token) {
+    if (!token) {
+      throw new BadRequestException('Magic token is required.');
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, this.getJwtAccessSecret());
+    } catch (error) {
+      throw new UnauthorizedException('Invalid or expired magic link.');
+    }
+
+    const normalizedEmail = (decoded?.email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new UnauthorizedException('Invalid magic link payload.');
+    }
+
+    let user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
+    });
+
+    if (!user) {
+      // Password-based login is optional for magic-link-only users.
+      const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
+      user = await prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          passwordHash: generatedPasswordHash,
+          name: null,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+        },
+      });
+    }
+
+    return this.createAuthResponse(user);
+  }
+
+  async authenticateGoogleCallback({ code, state }) {
+    if (!code) {
+      throw new BadRequestException('Google authorization code is missing.');
+    }
+
+    this.verifyOauthState(state, 'google');
+
+    const tokenPayload = await this.exchangeGoogleCodeForTokens(code);
+    const userProfile = await this.fetchGoogleUserProfile(tokenPayload.access_token);
+    const normalizedEmail = (userProfile?.email || '').trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      throw new UnauthorizedException('Google account email is unavailable.');
+    }
+
+    let user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
+    });
+
+    if (!user) {
+      const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
+      user = await prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          passwordHash: generatedPasswordHash,
+          name: (userProfile?.name || '').trim() || null,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+        },
+      });
+    }
+
+    return this.createAuthResponse(user);
+  }
+
   getOauthUrl(provider) {
     const normalizedProvider = (provider || '').toLowerCase();
 
-    if (!['google', 'github'].includes(normalizedProvider)) {
+    if (normalizedProvider !== 'google') {
       throw new BadRequestException('Unsupported OAuth provider.');
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    const state = crypto.randomBytes(16).toString('hex');
-
-    if (normalizedProvider === 'google') {
-      const clientId = process.env.GOOGLE_CLIENT_ID;
-      const redirectUri =
-        process.env.GOOGLE_REDIRECT_URI || `${frontendUrl}/login?oauth=google`;
-      if (!clientId) {
-        throw new BadRequestException(
-          'Google OAuth is not configured. Add GOOGLE_CLIENT_ID.',
-        );
-      }
-
-      const scope = encodeURIComponent('openid email profile');
-      return `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${encodeURIComponent(
-        clientId,
-      )}&redirect_uri=${encodeURIComponent(
-        redirectUri,
-      )}&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
-    }
-
-    const clientId = process.env.GITHUB_CLIENT_ID;
-    const redirectUri =
-      process.env.GITHUB_REDIRECT_URI || `${frontendUrl}/login?oauth=github`;
+    const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
       throw new BadRequestException(
-        'GitHub OAuth is not configured. Add GITHUB_CLIENT_ID.',
+        'Google OAuth is not configured. Add GOOGLE_CLIENT_ID.',
       );
     }
 
-    return `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(
+    const state = jwt.sign(
+      { provider: 'google', nonce: crypto.randomBytes(16).toString('hex') },
+      this.getJwtAccessSecret(),
+      { expiresIn: '10m' },
+    );
+
+    const scope = encodeURIComponent('openid email profile');
+    return `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${encodeURIComponent(
       clientId,
     )}&redirect_uri=${encodeURIComponent(
-      redirectUri,
-    )}&scope=${encodeURIComponent('read:user user:email')}&state=${state}`;
+      this.getGoogleRedirectUri(),
+    )}&scope=${scope}&state=${encodeURIComponent(state)}&access_type=offline&prompt=consent`;
   }
 
   getJwtAccessSecret() {
@@ -168,6 +263,101 @@ class AuthService {
 
   getJwtRefreshSecret() {
     return process.env.JWT_REFRESH_SECRET || this.getJwtAccessSecret();
+  }
+
+  getGoogleRedirectUri() {
+    if (process.env.GOOGLE_REDIRECT_URI) {
+      return process.env.GOOGLE_REDIRECT_URI;
+    }
+    const backendBaseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`;
+    return `${backendBaseUrl}/auth/oauth/google/callback`;
+  }
+
+  getGoogleClientSecret() {
+    if (!process.env.GOOGLE_CLIENT_SECRET) {
+      throw new BadRequestException('GOOGLE_CLIENT_SECRET is not configured.');
+    }
+    return process.env.GOOGLE_CLIENT_SECRET;
+  }
+
+  verifyOauthState(state, provider) {
+    if (!state) {
+      throw new UnauthorizedException('OAuth state is missing.');
+    }
+    try {
+      const decoded = jwt.verify(state, this.getJwtAccessSecret());
+      if (decoded?.provider !== provider) {
+        throw new UnauthorizedException('OAuth state is invalid.');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('OAuth state is invalid or expired.');
+    }
+  }
+
+  async exchangeGoogleCodeForTokens(code) {
+    const tokenUrl = 'https://oauth2.googleapis.com/token';
+    const body = new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: this.getGoogleClientSecret(),
+      redirect_uri: this.getGoogleRedirectUri(),
+      grant_type: 'authorization_code',
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload?.access_token) {
+      throw new BadRequestException(
+        payload?.error_description || payload?.error || 'Google token exchange failed.',
+      );
+    }
+
+    return payload;
+  }
+
+  async fetchGoogleUserProfile(accessToken) {
+    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new BadRequestException(payload?.error?.message || 'Failed to fetch Google profile.');
+    }
+    return payload;
+  }
+
+  createAuthResponse(user) {
+    const tokenPayload = { sub: user.id, email: user.email };
+
+    const accessToken = jwt.sign(tokenPayload, this.getJwtAccessSecret(), {
+      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
+    });
+
+    const refreshToken = jwt.sign(tokenPayload, this.getJwtRefreshSecret(), {
+      expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d',
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenType: 'Bearer',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+    };
   }
 }
 

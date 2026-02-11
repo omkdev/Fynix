@@ -1,77 +1,93 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
-
-const authModes = {
-  password: 'password',
-  oauth: 'oauth',
-  magic: 'magic',
-};
-
-const authMethodMeta = {
-  [authModes.password]: {
-    label: 'Email & Password',
-    hint: 'Use your email and password to sign in.',
-  },
-  [authModes.oauth]: {
-    label: 'Google or GitHub',
-    hint: 'Use your existing social account.',
-  },
-  [authModes.magic]: {
-    label: 'Email Link',
-    hint: 'Get a one-time sign-in link in your inbox.',
-  },
-};
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState(authModes.password);
+  const searchParams = useSearchParams();
+  const magicToken = searchParams.get('magic_token');
+  const oauthCode = searchParams.get('code');
+  const oauthState = searchParams.get('state');
+  const oauthError = searchParams.get('oauth_error');
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [magicEmail, setMagicEmail] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  const pageTitle = useMemo(() => {
-    if (mode === authModes.oauth) return 'Continue with Google or GitHub';
-    if (mode === authModes.magic) return 'Get a secure sign-in link';
-    return 'Sign in with your email and password';
-  }, [mode]);
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
 
-  async function handlePasswordLogin(event) {
-    event.preventDefault();
+    const timerId = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) return 0;
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [resendCooldown]);
+
+  useEffect(() => {
+    if (!magicToken) return;
+
+    let isActive = true;
+
+    async function verifyMagicToken() {
+      setIsLoading(true);
+      setStatus({ type: '', message: '' });
+
+      try {
+        const response = await fetch('/api/auth/magic-link/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token: magicToken }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.message || 'Magic link is invalid or expired.');
+        }
+
+        if (isActive) {
+          setStatus({ type: 'success', message: 'Magic link verified. Redirecting to dashboard...' });
+          router.push('/dashboard');
+        }
+      } catch (error) {
+        if (isActive) {
+          setStatus({ type: 'error', message: error.message });
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    verifyMagicToken();
+    return () => {
+      isActive = false;
+    };
+  }, [magicToken, router]);
+
+  useEffect(() => {
+    if (!oauthError) return;
+    setStatus({ type: 'error', message: oauthError });
+  }, [oauthError]);
+
+  useEffect(() => {
+    if (!oauthCode || !oauthState) return;
+
     setIsLoading(true);
     setStatus({ type: '', message: '' });
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.message || 'Unable to sign in. Please try again.');
-      }
-
-      if (payload?.accessToken) {
-        localStorage.setItem('fynix_access_token', payload.accessToken);
-      }
-      if (payload?.refreshToken) {
-        localStorage.setItem('fynix_refresh_token', payload.refreshToken);
-      }
-
-      setStatus({ type: 'success', message: 'Login successful. Redirecting to dashboard...' });
-      router.push('/dashboard');
-    } catch (error) {
-      setStatus({ type: 'error', message: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    const query = new URLSearchParams({
+      code: oauthCode,
+      state: oauthState,
+    });
+    window.location.href = `/api/auth/oauth/google/callback?${query.toString()}`;
+  }, [oauthCode, oauthState]);
 
   async function handleMagicLink(event) {
     event.preventDefault();
@@ -82,6 +98,7 @@ export default function LoginPage() {
       const response = await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: magicEmail }),
       });
 
@@ -92,8 +109,9 @@ export default function LoginPage() {
 
       setStatus({
         type: 'success',
-        message: 'Magic link sent. Check your inbox (Resend integration).',
+        message: 'If an account exists, we have sent a sign-in link to that email.',
       });
+      setResendCooldown(30);
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
     } finally {
@@ -101,9 +119,9 @@ export default function LoginPage() {
     }
   }
 
-  function handleOAuth(provider) {
+  function handleGoogleLogin() {
     setStatus({ type: '', message: '' });
-    window.location.href = `/api/auth/oauth/${provider}`;
+    window.location.href = '/api/auth/oauth/google';
   }
 
   return (
@@ -114,144 +132,53 @@ export default function LoginPage() {
             Fynix
           </Link>
           <h1 className="mt-3 text-2xl font-bold text-slate-900">Login</h1>
-          <p className="mt-1 text-sm text-slate-600">{pageTitle}</p>
+          <p className="mt-1 text-sm text-slate-600">Continue with Google or use a secure email link.</p>
         </div>
 
-        <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-2">
-          <div className="mb-2 px-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Sign-in method</p>
-            <p className="text-xs text-slate-500">Choose the option that is easiest for you.</p>
-          </div>
-          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-            <button
-              type="button"
-              onClick={() => setMode(authModes.password)}
-              className={`rounded-lg border px-3 py-3 text-left transition ${
-                mode === authModes.password
-                  ? 'border-primary-200 bg-white text-slate-900 shadow-sm'
-                  : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white'
-              }`}
-            >
-              <p className="font-medium">{authMethodMeta[authModes.password].label}</p>
-              <p className="mt-1 text-xs text-slate-500">{authMethodMeta[authModes.password].hint}</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode(authModes.oauth)}
-              className={`rounded-lg border px-3 py-3 text-left transition ${
-                mode === authModes.oauth
-                  ? 'border-primary-200 bg-white text-slate-900 shadow-sm'
-                  : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white'
-              }`}
-            >
-              <p className="font-medium">{authMethodMeta[authModes.oauth].label}</p>
-              <p className="mt-1 text-xs text-slate-500">{authMethodMeta[authModes.oauth].hint}</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode(authModes.magic)}
-              className={`rounded-lg border px-3 py-3 text-left transition ${
-                mode === authModes.magic
-                  ? 'border-primary-200 bg-white text-slate-900 shadow-sm'
-                  : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white'
-              }`}
-            >
-              <p className="font-medium">{authMethodMeta[authModes.magic].label}</p>
-              <p className="mt-1 text-xs text-slate-500">{authMethodMeta[authModes.magic].hint}</p>
-            </button>
-          </div>
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={isLoading}
+          className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          Continue with Google
+        </button>
+
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span className="text-xs uppercase tracking-wide text-slate-400">or</span>
+          <div className="h-px flex-1 bg-slate-200" />
         </div>
 
-        {mode === authModes.password && (
-          <form onSubmit={handlePasswordLogin} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-                autoComplete="email"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
-                placeholder="you@example.com"
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                autoComplete="current-password"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
-                placeholder="Enter your password"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isLoading ? 'Signing in...' : 'Sign in'}
-            </button>
-          
-          </form>
-        )}
-
-        {mode === authModes.oauth && (
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => handleOAuth('google')}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Continue with Google
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOAuth('github')}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Continue with GitHub
-            </button>
-           
+        <form onSubmit={handleMagicLink} className="space-y-4">
+          <div>
+            <label htmlFor="magic-email" className="mb-1 block text-sm font-medium text-slate-700">
+              Email
+            </label>
+            <input
+              id="magic-email"
+              type="email"
+              value={magicEmail}
+              onChange={(event) => setMagicEmail(event.target.value)}
+              required
+              autoComplete="email"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+              placeholder="you@example.com"
+            />
           </div>
-        )}
-
-        {mode === authModes.magic && (
-          <form onSubmit={handleMagicLink} className="space-y-4">
-            <div>
-              <label htmlFor="magic-email" className="mb-1 block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                id="magic-email"
-                type="email"
-                value={magicEmail}
-                onChange={(event) => setMagicEmail(event.target.value)}
-                required
-                autoComplete="email"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
-                placeholder="you@example.com"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isLoading ? 'Sending link...' : 'Send magic link'}
-            </button>
-           
-          </form>
-        )}
+          <button
+            type="submit"
+            disabled={isLoading || resendCooldown > 0}
+            className="w-full rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isLoading
+              ? 'Sending link...'
+              : resendCooldown > 0
+                ? `Resend in ${resendCooldown}s`
+                : 'Continue with Email (magic link)'}
+          </button>
+          <p className="text-xs text-slate-500">We will send a secure sign-in link to your email.</p>
+        </form>
 
         {status.message && (
           <div
@@ -264,6 +191,7 @@ export default function LoginPage() {
             {status.message}
           </div>
         )}
+
       </div>
     </main>
   );
