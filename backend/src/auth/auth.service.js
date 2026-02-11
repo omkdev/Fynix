@@ -7,13 +7,15 @@ const { PrismaClient } = require('@prisma/client');
 const {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
+  NotFoundException,
   UnauthorizedException,
 } = require('@nestjs/common');
 
 const prisma = new PrismaClient();
 
 class AuthService {
-  async register({ name, email, password }) {
+  async register({ name, email, password }, requestMeta = {}) {
     const normalizedEmail = (email || '').trim().toLowerCase();
     const normalizedName = (name || '').trim();
 
@@ -44,13 +46,20 @@ class AuthService {
         id: true,
         email: true,
         name: true,
+        tokenVersion: true,
       },
     });
 
-    return this.createAuthResponse(createdUser);
+    const authResponse = this.createAuthResponse(createdUser);
+    await this.recordLoginEvent({
+      user: createdUser,
+      method: 'register',
+      requestMeta,
+    });
+    return authResponse;
   }
 
-  async login(email, password) {
+  async login(email, password, requestMeta = {}) {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail || !password) {
       throw new BadRequestException('Email and password are required.');
@@ -63,6 +72,9 @@ class AuthService {
         email: true,
         name: true,
         passwordHash: true,
+        isBlocked: true,
+        blockedReason: true,
+        tokenVersion: true,
       },
     });
 
@@ -75,7 +87,15 @@ class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    return this.createAuthResponse(user);
+    this.ensureUserNotBlocked(user);
+
+    const authResponse = this.createAuthResponse(user);
+    await this.recordLoginEvent({
+      user,
+      method: 'password',
+      requestMeta,
+    });
+    return authResponse;
   }
 
   async sendMagicLink(email) {
@@ -137,7 +157,7 @@ class AuthService {
     };
   }
 
-  async verifyMagicLink(token) {
+  async verifyMagicLink(token, requestMeta = {}) {
     if (!token) {
       throw new BadRequestException('Magic token is required.');
     }
@@ -160,6 +180,9 @@ class AuthService {
         id: true,
         email: true,
         name: true,
+        isBlocked: true,
+        blockedReason: true,
+        tokenVersion: true,
       },
     });
 
@@ -176,14 +199,25 @@ class AuthService {
           id: true,
           email: true,
           name: true,
+          isBlocked: true,
+          blockedReason: true,
+          tokenVersion: true,
         },
       });
     }
 
-    return this.createAuthResponse(user);
+    this.ensureUserNotBlocked(user);
+
+    const authResponse = this.createAuthResponse(user);
+    await this.recordLoginEvent({
+      user,
+      method: 'magic_link',
+      requestMeta,
+    });
+    return authResponse;
   }
 
-  async authenticateGoogleCallback({ code, state }) {
+  async authenticateGoogleCallback({ code, state }, requestMeta = {}) {
     if (!code) {
       throw new BadRequestException('Google authorization code is missing.');
     }
@@ -204,6 +238,9 @@ class AuthService {
         id: true,
         email: true,
         name: true,
+        isBlocked: true,
+        blockedReason: true,
+        tokenVersion: true,
       },
     });
 
@@ -219,11 +256,22 @@ class AuthService {
           id: true,
           email: true,
           name: true,
+          isBlocked: true,
+          blockedReason: true,
+          tokenVersion: true,
         },
       });
     }
 
-    return this.createAuthResponse(user);
+    this.ensureUserNotBlocked(user);
+
+    const authResponse = this.createAuthResponse(user);
+    await this.recordLoginEvent({
+      user,
+      method: 'google_oauth',
+      requestMeta,
+    });
+    return authResponse;
   }
 
   getOauthUrl(provider) {
@@ -323,6 +371,114 @@ class AuthService {
     return payload;
   }
 
+  async getSessionUser(accessToken) {
+    if (!accessToken) {
+      throw new UnauthorizedException('Not authenticated.');
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = jwt.verify(accessToken, this.getJwtAccessSecret());
+    } catch (error) {
+      throw new UnauthorizedException('Session is invalid or expired.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken?.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isBlocked: true,
+        blockedReason: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Session user not found.');
+    }
+
+    if (Number(decodedToken?.tv ?? -1) !== Number(user.tokenVersion)) {
+      throw new UnauthorizedException('Session has been revoked.');
+    }
+
+    this.ensureUserNotBlocked(user);
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+    };
+  }
+
+  async blockUserByEmail({ email, reason }) {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required.');
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true, email: true, isBlocked: true },
+    });
+    if (!existingUser) {
+      throw new NotFoundException('User not found.');
+    }
+
+    const blockedUser = await prisma.user.update({
+      where: { email: normalizedEmail },
+      data: {
+        isBlocked: true,
+        blockedAt: new Date(),
+        blockedReason: (reason || '').trim() || null,
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+      select: {
+        id: true,
+        email: true,
+        isBlocked: true,
+        blockedAt: true,
+        blockedReason: true,
+      },
+    });
+
+    return blockedUser;
+  }
+
+  async unblockUserByEmail({ email }) {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required.');
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+    if (!existingUser) {
+      throw new NotFoundException('User not found.');
+    }
+
+    return prisma.user.update({
+      where: { email: normalizedEmail },
+      data: {
+        isBlocked: false,
+        blockedAt: null,
+        blockedReason: null,
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+      select: {
+        id: true,
+        email: true,
+        isBlocked: true,
+      },
+    });
+  }
+
   async fetchGoogleUserProfile(accessToken) {
     const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
@@ -337,8 +493,42 @@ class AuthService {
     return payload;
   }
 
+  async recordLoginEvent({ user, method, requestMeta }) {
+    if (!user?.id || !user?.email) {
+      return;
+    }
+
+    const ipAddress = this.normalizeIpAddress(requestMeta?.ipAddress);
+    const userAgent = this.normalizeUserAgent(requestMeta?.userAgent);
+
+    try {
+      await prisma.loginEvent.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          method,
+          ipAddress,
+          userAgent,
+        },
+      });
+    } catch (error) {
+      // Non-blocking audit logging: auth should still succeed.
+      console.warn('Login event write skipped:', error?.message || error);
+    }
+  }
+
+  normalizeIpAddress(ipAddress) {
+    if (!ipAddress || typeof ipAddress !== 'string') return null;
+    return ipAddress.trim().slice(0, 120) || null;
+  }
+
+  normalizeUserAgent(userAgent) {
+    if (!userAgent || typeof userAgent !== 'string') return null;
+    return userAgent.trim().slice(0, 512) || null;
+  }
+
   createAuthResponse(user) {
-    const tokenPayload = { sub: user.id, email: user.email };
+    const tokenPayload = { sub: user.id, email: user.email, tv: user.tokenVersion ?? 0 };
 
     const accessToken = jwt.sign(tokenPayload, this.getJwtAccessSecret(), {
       expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
@@ -358,6 +548,12 @@ class AuthService {
         name: user.name,
       },
     };
+  }
+
+  ensureUserNotBlocked(user) {
+    if (!user?.isBlocked) return;
+    const reason = user?.blockedReason ? ` Reason: ${user.blockedReason}` : '';
+    throw new ForbiddenException(`Your account is blocked.${reason}`);
   }
 }
 

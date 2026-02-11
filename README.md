@@ -2,6 +2,15 @@
 
 AI-powered personal finance platform (backend + frontend).
 
+<!-- cd backend
+npm install
+npm run prisma:migrate
+npm run start:dev -->
+
+<!-- cd frontend
+npm install
+image.pngnpm run dev -->
+
 ## Prerequisites
 
 - **Node.js** 18+

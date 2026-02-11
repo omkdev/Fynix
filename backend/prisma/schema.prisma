@@ -16,10 +16,15 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String?
+  isBlocked    Boolean  @default(false) @map("is_blocked")
+  blockedAt    DateTime? @map("blocked_at")
+  blockedReason String? @map("blocked_reason")
+  tokenVersion Int      @default(0) @map("token_version")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  expenses Expense[]
+  expenses    Expense[]
+  loginEvents LoginEvent[]
 
   @@map("users")
 }
@@ -38,4 +43,46 @@ model Expense {
   @@index([userId])
   @@index([userId, createdAt])
   @@map("expenses")
+}
+
+model LoginEvent {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  email     String
+  method    String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@map("login_events")
+}
+
+enum ContactSubmissionStatus {
+  NEW
+  EMAILED
+  EMAIL_FAILED
+}
+
+model ContactSubmission {
+  id              String                  @id @default(cuid())
+  name            String
+  email           String
+  subject         String
+  message         String
+  status          ContactSubmissionStatus @default(NEW)
+  consentGiven    Boolean                 @default(false) @map("consent_given")
+  ipAddressHash   String?                 @map("ip_address_hash")
+  ipAddressMasked String?                 @map("ip_address_masked")
+  userAgent       String?                 @map("user_agent")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  @@index([createdAt])
+  @@index([email, createdAt])
+  @@index([status, createdAt])
+  @@map("contact_submissions")
 }
