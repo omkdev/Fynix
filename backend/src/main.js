@@ -4,7 +4,9 @@ require('reflect-metadata');
 
 const crypto = require('crypto');
 const express = require('express');
+const helmet = require('helmet');
 const nodemailer = require('nodemailer');
+const rateLimit = require('express-rate-limit');
 const { NestFactory } = require('@nestjs/core');
 const { PrismaClient } = require('@prisma/client');
 const { AppModule } = require('./app.module');
@@ -122,15 +124,104 @@ function getCookieValue(request, name) {
   for (const part of cookieParts) {
     const [rawKey, ...rawValueParts] = part.trim().split('=');
     if (rawKey !== name) continue;
-    return decodeURIComponent(rawValueParts.join('='));
+    const encodedValue = rawValueParts.join('=');
+    if (!encodedValue) return '';
+    try {
+      return decodeURIComponent(encodedValue.replace(/\+/g, ' '));
+    } catch (_error) {
+      return null;
+    }
   }
   return null;
 }
 
+function isWeakAdminApiKey(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return true;
+  if (normalized === 'change-me-admin-key') return true;
+  return normalized.length < 24;
+}
+
+function normalizeHttpOrigin(value) {
+  const candidate = String(value || '').trim();
+  if (!candidate) return null;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.origin;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isWeakJwtSecret(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return true;
+  if (normalized.length < 32) return true;
+  if (/your-|change-me|replace-with/i.test(normalized)) return true;
+  return false;
+}
+
+function getAllowedCorsOrigins() {
+  const rawOrigins = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:3001';
+  const normalizedOrigins = rawOrigins
+    .split(',')
+    .map((origin) => normalizeHttpOrigin(origin))
+    .filter(Boolean);
+  return Array.from(new Set(normalizedOrigins));
+}
+
+function assertProductionSecurityConfig() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!isProduction) return;
+
+  const accessSecret = process.env.JWT_ACCESS_SECRET;
+  const refreshSecret = process.env.JWT_REFRESH_SECRET;
+  const frontendOrigin = normalizeHttpOrigin(process.env.FRONTEND_URL);
+  const allowedCorsOrigins = getAllowedCorsOrigins();
+
+  if (isWeakJwtSecret(accessSecret)) {
+    throw new Error(
+      'JWT_ACCESS_SECRET is missing or weak in production. Use a strong random secret with at least 32 characters.',
+    );
+  }
+
+  if (isWeakJwtSecret(refreshSecret)) {
+    throw new Error(
+      'JWT_REFRESH_SECRET is missing or weak in production. Use a strong random secret with at least 32 characters.',
+    );
+  }
+
+  if (String(accessSecret).trim() === String(refreshSecret).trim()) {
+    throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different in production.');
+  }
+
+  if (!process.env.CORS_ORIGIN || !allowedCorsOrigins.length) {
+    throw new Error('CORS_ORIGIN must contain at least one valid http/https origin in production.');
+  }
+
+  if (!frontendOrigin) {
+    throw new Error('FRONTEND_URL must be configured with a valid http/https URL in production.');
+  }
+
+  if (!allowedCorsOrigins.includes(frontendOrigin)) {
+    throw new Error('CORS_ORIGIN must include FRONTEND_URL in production.');
+  }
+
+  if (isWeakAdminApiKey(process.env.ADMIN_API_KEY)) {
+    throw new Error(
+      'ADMIN_API_KEY is missing or weak in production. Use a strong random key with at least 24 characters.',
+    );
+  }
+}
+
 function verifyAdminKey(request) {
   const configuredKey = process.env.ADMIN_API_KEY;
-  if (!configuredKey) {
-    throw new Error('ADMIN_API_KEY is not configured.');
+  if (!configuredKey || isWeakAdminApiKey(configuredKey)) {
+    throw new Error('ADMIN_API_KEY is missing or weak.');
   }
   const providedKey = request.headers?.['x-admin-key'];
   if (providedKey !== configuredKey) {
@@ -759,20 +850,49 @@ async function learnMerchantMappingFromCorrection({
 }
 
 async function bootstrap() {
+  assertProductionSecurityConfig();
+
   const app = await NestFactory.create(AppModule);
   const port = process.env.PORT || 3000;
   const authService = new AuthService();
+  const allowedCorsOrigins = getAllowedCorsOrigins();
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  const authRateLimiter = rateLimit({
+    windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || 20),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many authentication attempts. Please try again later.' },
+  });
+  const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '100kb';
+  const urlencodedBodyLimit = process.env.URLENCODED_BODY_LIMIT || '100kb';
+
+  app.use(express.json({ limit: jsonBodyLimit }));
+  app.use(express.urlencoded({ extended: true, limit: urlencodedBodyLimit }));
+  app.use(helmet());
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || true,
+    origin(origin, callback) {
+      // Allow requests without Origin (same-origin/server-to-server clients).
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedCorsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
   });
 
   const server = app.getHttpAdapter().getInstance();
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+
+  server.use('/auth', authRateLimiter);
 
   server.post('/contact', async (request, response) => {
     try {

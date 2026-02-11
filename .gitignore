@@ -29,3 +29,13 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Private keys / certificates
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Optional local secret tooling
+.direnv/
+.envrc

@@ -120,12 +120,17 @@ class AuthService {
     const fromEmail = process.env.RESEND_FROM_EMAIL || 'Fynix <onboarding@resend.dev>';
 
     if (!resendApiKey) {
-      return {
+      const responsePayload = {
         success: true,
-        message:
-          'Resend is not configured. Magic link generated in development mode.',
-        previewLink: magicLink,
+        message: 'Magic link service is not configured.',
       };
+
+      if (process.env.NODE_ENV === 'development') {
+        responsePayload.message = 'Resend is not configured. Magic link generated in development mode.';
+        responsePayload.previewLink = magicLink;
+      }
+
+      return responsePayload;
     }
 
     const resendResponse = await fetch('https://api.resend.com/emails', {
@@ -310,7 +315,16 @@ class AuthService {
   }
 
   getJwtRefreshSecret() {
-    return process.env.JWT_REFRESH_SECRET || this.getJwtAccessSecret();
+    const refreshSecret = process.env.JWT_REFRESH_SECRET;
+    if (refreshSecret) {
+      return refreshSecret;
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException('JWT_REFRESH_SECRET is not configured.');
+    }
+
+    return this.getJwtAccessSecret();
   }
 
   getGoogleRedirectUri() {
