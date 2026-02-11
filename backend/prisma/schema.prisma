@@ -1,0 +1,41 @@
+// Fynix - AI-powered personal finance platform
+// Prisma schema - Supabase database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  expenses Expense[]
+
+  @@map("users")
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  amount        Decimal  @db.Decimal(12, 2)
+  category      String
+  description   String?
+  paymentMethod String?  @map("payment_method")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@map("expenses")
+}

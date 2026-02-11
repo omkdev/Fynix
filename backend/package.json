@@ -1,0 +1,37 @@
+{
+  "name": "fynix-backend",
+  "version": "1.0.0",
+  "description": "AI-powered personal finance platform API",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:prod": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@prisma/client": "^5.22.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.9",
+    "@swc/cli": "^0.5.2",
+    "@swc/core": "^1.8.9",
+    "prisma": "^5.22.0",
+    "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "glob": ">=10.4.6",
+    "tmp": ">=0.2.4"
+  }
+}
