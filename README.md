@@ -66,3 +66,26 @@ Frontend runs at **http://localhost:3001** (or 3000 if free).
 | Frontend | `frontend/` | `npm run dev`     | http://localhost:3001 |
 
 Open the frontend URL in the browser; use “Go to Dashboard” from the home page.
+
+## Expense API (Phase 1 + 2)
+
+Backend now includes authenticated expense routes:
+
+- `GET /expenses`
+- `POST /expenses`
+- `PUT /expenses/:expenseId`
+- `PATCH /expenses/:expenseId/category`
+- `GET /expenses/summary`
+
+Categorization pipeline now supports:
+
+1. Merchant dictionary lookup (`merchant_category_map`)
+2. Rule-based fallback
+3. Optional AI/local fallback based on `CATEGORIZATION_MODE`
+
+Available modes:
+
+- `rules_only`
+- `rules_plus_openai` (default)
+- `rules_plus_local`
+- `rules_plus_local_then_openai`

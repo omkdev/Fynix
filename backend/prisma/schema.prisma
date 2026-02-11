@@ -23,8 +23,11 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  expenses    Expense[]
-  loginEvents LoginEvent[]
+  expenses      Expense[]
+  loginEvents   LoginEvent[]
+  notifications Notification[]
+  categoryCorrections CategoryCorrection[]
+  merchantCategoryMappings MerchantCategoryMap[]
 
   @@map("users")
 }
@@ -34,14 +37,23 @@ model Expense {
   userId        String   @map("user_id")
   amount        Decimal  @db.Decimal(12, 2)
   category      String
+  aiCategory    String?  @map("ai_category")
+  aiConfidence  Float?   @map("ai_confidence")
+  aiReason      String?  @map("ai_reason")
   description   String?
+  merchant      String?
   paymentMethod String?  @map("payment_method")
+  currency      String   @default("INR")
+  occurredAt    DateTime @default(now()) @map("occurred_at")
   createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, createdAt])
+  @@index([userId, occurredAt])
+  @@index([userId, category, occurredAt])
   @@map("expenses")
 }
 
@@ -85,4 +97,68 @@ model ContactSubmission {
   @@index([email, createdAt])
   @@index([status, createdAt])
   @@map("contact_submissions")
+}
+
+enum NotificationType {
+  INFO
+  ANOMALY_ALERT
+  BILL_REMINDER
+  SUBSCRIPTION_ALERT
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  meta      Json?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model MerchantCategoryMap {
+  id               String    @id @default(cuid())
+  userId           String?   @map("user_id")
+  merchantKeyword  String    @map("merchant_keyword")
+  normalizedKeyword String   @map("normalized_keyword")
+  category         String
+  confidenceScore  Float     @default(0.8) @map("confidence_score")
+  source           String    @default("seed")
+  hitCount         Int       @default(0) @map("hit_count")
+  lastMatchedAt    DateTime? @map("last_matched_at")
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([normalizedKeyword])
+  @@index([userId, normalizedKeyword])
+  @@index([category, confidenceScore])
+  @@map("merchant_category_map")
+}
+
+model CategoryCorrection {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  expenseId   String?  @map("expense_id")
+  merchant    String?
+  description String?
+  oldCategory String   @map("old_category")
+  newCategory String   @map("new_category")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, merchant])
+  @@map("category_corrections")
 }

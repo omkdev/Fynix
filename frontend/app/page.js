@@ -56,6 +56,7 @@ export default function HomePage() {
   useEffect(() => {
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReducedMotion) return;
+    let cleanupCardTilt = () => {};
 
     gsap.registerPlugin(ScrollTrigger);
     ScrollTrigger.config({
@@ -103,14 +104,6 @@ export default function HomePage() {
           '<',
         );
 
-      gsap.to('[data-preview-float]', {
-        y: -3,
-        duration: 2.2,
-        ease: 'sine.inOut',
-        repeat: -1,
-        yoyo: true,
-      });
-
       gsap.to('[data-preview-card]', {
         boxShadow: '0 12px 30px rgba(15, 23, 42, 0.08)',
         duration: 3,
@@ -118,6 +111,62 @@ export default function HomePage() {
         repeat: -1,
         yoyo: true,
       });
+
+      const previewRegion = pageRef.current?.querySelector('[data-preview-parallax]');
+      const previewCard = pageRef.current?.querySelector('[data-preview-card]');
+      const previewInner = pageRef.current?.querySelector('[data-preview-tilt-inner]');
+      if (previewRegion && previewCard) {
+        gsap.set(previewRegion, { perspective: 750 });
+        gsap.set(previewCard, {
+          transformStyle: 'preserve-3d',
+          transformOrigin: 'center center',
+        });
+
+        const rotateXTo = gsap.quickTo(previewCard, 'rotationX', {
+          duration: 0.5,
+          ease: 'power3.out',
+        });
+        const rotateYTo = gsap.quickTo(previewCard, 'rotationY', {
+          duration: 0.5,
+          ease: 'power3.out',
+        });
+        const innerXTo = previewInner
+          ? gsap.quickTo(previewInner, 'x', {
+              duration: 0.5,
+              ease: 'power3.out',
+            })
+          : null;
+        const innerYTo = previewInner
+          ? gsap.quickTo(previewInner, 'y', {
+              duration: 0.5,
+              ease: 'power3.out',
+            })
+          : null;
+
+        const handlePointerMove = (event) => {
+          const bounds = previewRegion.getBoundingClientRect();
+          const pointerX = gsap.utils.clamp(0, 1, (event.clientX - bounds.left) / bounds.width);
+          const pointerY = gsap.utils.clamp(0, 1, (event.clientY - bounds.top) / bounds.height);
+          rotateXTo(gsap.utils.interpolate(12, -12, pointerY));
+          rotateYTo(gsap.utils.interpolate(-12, 12, pointerX));
+          innerXTo?.(gsap.utils.interpolate(-16, 16, pointerX));
+          innerYTo?.(gsap.utils.interpolate(-16, 16, pointerY));
+        };
+
+        const handlePointerLeave = () => {
+          rotateXTo(0);
+          rotateYTo(0);
+          innerXTo?.(0);
+          innerYTo?.(0);
+        };
+
+        previewRegion.addEventListener('pointermove', handlePointerMove);
+        previewRegion.addEventListener('pointerleave', handlePointerLeave);
+        cleanupCardTilt = () => {
+          previewRegion.removeEventListener('pointermove', handlePointerMove);
+          previewRegion.removeEventListener('pointerleave', handlePointerLeave);
+        };
+      }
 
       gsap.to('[data-hero-copy]', {
         y: -12,
@@ -218,6 +267,7 @@ export default function HomePage() {
         const targetValue = Number(element.getAttribute('data-target') || '0');
         const startValue = Number(element.getAttribute('data-start') || '0');
         const counter = { value: startValue };
+        const isCurrencyCount = countType === 'currency';
 
         if (countType === 'currency') {
           element.textContent = `₹${currencyFormatter.format(startValue)}`;
@@ -228,8 +278,8 @@ export default function HomePage() {
 
         gsap.to(counter, {
           value: targetValue,
-          duration: 1.25,
-          ease: 'power2.out',
+          duration: isCurrencyCount ? 4 : 1.25,
+          ease: isCurrencyCount ? 'none' : 'power2.out',
           scrollTrigger: {
             trigger: '[data-preview-float]',
             start: 'top 92%',
@@ -269,7 +319,10 @@ export default function HomePage() {
       });
     }, pageRef);
 
-    return () => context.revert();
+    return () => {
+      cleanupCardTilt();
+      context.revert();
+    };
   }, []);
 
   return (
@@ -299,7 +352,7 @@ export default function HomePage() {
                 data-hero-cta-primary
                 className="inline-flex rounded-lg bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition-transform duration-200 hover:scale-105 hover:bg-primary-700"
               >
-                Log in to Fynix
+                Get Started
               </Link>
               <a
                 href="#how-it-works"
@@ -326,7 +379,7 @@ export default function HomePage() {
                 data-preview-card
                 className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
               >
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-preview-tilt-inner>
                   <div data-preview-bar className="h-3 w-28 rounded bg-primary-100" />
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <div data-preview-metric className="rounded-lg border border-slate-200 bg-white p-3">
@@ -430,7 +483,7 @@ export default function HomePage() {
             href="/login"
             className="mt-5 inline-flex rounded-lg bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700"
           >
-            Log in to Fynix
+            Tap to get started
           </Link>
         </div>
       </section>

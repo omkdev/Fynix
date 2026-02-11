@@ -411,6 +411,42 @@ class AuthService {
     };
   }
 
+  async refreshSession(refreshToken) {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required.');
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = jwt.verify(refreshToken, this.getJwtRefreshSecret());
+    } catch (error) {
+      throw new UnauthorizedException('Refresh session is invalid or expired.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken?.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isBlocked: true,
+        blockedReason: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Refresh session user not found.');
+    }
+
+    if (Number(decodedToken?.tv ?? -1) !== Number(user.tokenVersion)) {
+      throw new UnauthorizedException('Refresh session has been revoked.');
+    }
+
+    this.ensureUserNotBlocked(user);
+    return this.createAuthResponse(user);
+  }
+
   async blockUserByEmail({ email, reason }) {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail) {
