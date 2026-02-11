@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -104,7 +105,7 @@ export default function HomePage() {
           '<',
         );
 
-      gsap.to('[data-preview-card]', {
+        gsap.to('[data-preview-card]', {
         boxShadow: '0 12px 30px rgba(15, 23, 42, 0.08)',
         duration: 3,
         ease: 'sine.inOut',
@@ -335,11 +336,18 @@ export default function HomePage() {
       <section className="mx-auto max-w-6xl px-4 py-14 md:py-20">
         <div className="grid items-center gap-10 md:grid-cols-2">
           <header data-hero-copy>
-            <p data-hero-badge className="text-sm font-semibold uppercase tracking-wider text-primary-600">
-              Fynix
-            </p>
+            <div data-hero-badge className="inline-flex">
+              <Image
+                src="/assets/fynix-logo-name.png"
+                alt="Fynix"
+                width={220}
+                height={80}
+                priority
+                className="h-auto w-36 md:w-44"
+              />
+            </div>
             <h1 data-hero-title className="mt-3 text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
-              Track spending clearly and build better money habits with AI support
+              Bas spend karo, baaki <span className="text-primary-600">Fynix</span> dekh lega.
             </h1>
             <p data-hero-subtitle className="mt-4 max-w-xl text-base text-slate-600 md:text-lg">
               Fynix helps everyday users track spending with clarity, uncover category-level insights,
@@ -418,7 +426,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-20 md:pb-24" data-reveal-group>
+      <section className="mx-auto max-w-6xl px-4 pb-14 md:pb-16" data-reveal-group>
         <div className="grid gap-4 md:grid-cols-3">
           {trustPoints.map((point) => (
             <article
@@ -433,7 +441,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-20 md:pb-24" data-reveal-group>
+      <section className="mx-auto max-w-6xl px-4 pb-14 md:pb-16" data-reveal-group>
         <h2 className="text-2xl font-bold text-slate-900">Core features</h2>
         <p className="mt-2 text-slate-600">Everything you need to build consistent financial awareness.</p>
         <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -450,7 +458,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-20 md:pb-24" data-reveal-group>
+      <section className="mx-auto max-w-6xl px-4 pb-14 md:pb-16" data-reveal-group>
         <h2 id="how-it-works" className="text-2xl font-bold text-slate-900">
           How it works
         </h2>
@@ -472,7 +480,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-20 md:pb-24">
+      <section className="mx-auto max-w-6xl px-4 pb-14 md:pb-16">
         <div
           data-cta-box
           className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-6 py-10 text-center shadow-sm ring-1 ring-primary-200"
