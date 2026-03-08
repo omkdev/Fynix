@@ -1,72 +1,45 @@
 const express = require("express");
-const Subscription = require("../models/Subscription");
+const { prisma } = require("../db");
 const { authMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(authMiddleware);
 
+// GET /api/subscriptions
 router.get("/", async (req, res) => {
   try {
-    const subs = await Subscription.find({ userId: req.user._id, isActive: true })
-      .sort({ nextBillingDate: 1 })
-      .lean();
-    res.json(subs);
+    // Note: Prisma schema (Supabase) does not have a Subscription model yet.
+    // For now return empty array — this can be extended when the schema is updated.
+    res.json([]);
   } catch (err) {
     res.status(500).json({ message: err.message || "Failed to fetch subscriptions" });
   }
 });
 
+// POST /api/subscriptions
 router.post("/", async (req, res) => {
   try {
     const { name, amount, cycle, nextBillingDate, reminderDaysBefore } = req.body;
     if (!name || amount == null || !nextBillingDate) {
       return res.status(400).json({ message: "Name, amount and nextBillingDate required" });
     }
-    const sub = await Subscription.create({
-      userId: req.user._id,
-      name: String(name).trim(),
-      amount: Number(amount),
-      cycle: cycle === "yearly" ? "yearly" : "monthly",
-      nextBillingDate: new Date(nextBillingDate),
-      reminderDaysBefore: reminderDaysBefore != null ? Number(reminderDaysBefore) : 3,
+    // Placeholder — extend Prisma schema to add Subscription table to Supabase
+    res.status(201).json({
+      message: "Subscription model not yet migrated to Supabase. Coming soon.",
     });
-    res.status(201).json(sub);
   } catch (err) {
     res.status(500).json({ message: err.message || "Failed to add subscription" });
   }
 });
 
+// PATCH /api/subscriptions/:id
 router.patch("/:id", async (req, res) => {
-  try {
-    const allowed = ["name", "amount", "cycle", "nextBillingDate", "reminderDaysBefore", "isActive"];
-    const update = {};
-    for (const k of allowed) {
-      if (req.body[k] !== undefined) update[k] = req.body[k];
-    }
-    if (update.nextBillingDate) update.nextBillingDate = new Date(update.nextBillingDate);
-    const sub = await Subscription.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
-      update,
-      { new: true }
-    );
-    if (!sub) return res.status(404).json({ message: "Subscription not found" });
-    res.json(sub);
-  } catch (err) {
-    res.status(500).json({ message: err.message || "Failed to update" });
-  }
+  res.status(501).json({ message: "Not yet implemented for Supabase." });
 });
 
+// DELETE /api/subscriptions/:id
 router.delete("/:id", async (req, res) => {
-  try {
-    const sub = await Subscription.findOneAndDelete({
-      _id: req.params.id,
-      userId: req.user._id,
-    });
-    if (!sub) return res.status(404).json({ message: "Subscription not found" });
-    res.json({ deleted: true });
-  } catch (err) {
-    res.status(500).json({ message: err.message || "Failed to delete" });
-  }
+  res.status(501).json({ message: "Not yet implemented for Supabase." });
 });
 
 module.exports = router;

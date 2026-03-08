@@ -9,25 +9,21 @@ const app = express();
 const PORT = Number(process.env.PORT || 4000);
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
 
-app.use(
-  cors({
-    origin: FRONTEND_ORIGIN,
-    credentials: true,
-  })
-);
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 
+// Health check
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", message: "Express API is healthy." });
+  res.json({ status: "ok", message: "Express API (Supabase) is healthy." });
 });
 
+// Routes
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/expenses", require("./routes/expenses"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
 
 async function start() {
   await connectDB();
-  require("./cron/reminders");
   app.listen(PORT, () => {
     console.log(`Express API running on http://localhost:${PORT}`);
   });

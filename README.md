@@ -1,91 +1,40 @@
-# Fynix
+# Fynix - Smart Expense Tracker
 
-AI-powered personal finance platform (backend + frontend).
+A streamlined finance management app built for simplicity and performance.
 
-<!-- cd backend
-npm install
-npm run prisma:migrate
-npm run start:dev -->
+## 🏗 Project Architecture
 
-<!-- cd frontend
-npm install
-image.pngnpm run dev -->
+```
+Frontend (React — CRA)  <--->  API Server (Node.js + Express)  <--->  Database (Supabase PostgreSQL)
+```
 
-## Prerequisites
+## 📂 Project Structure
 
-- **Node.js** 18+
-- **Supabase** (for backend database)
-- **Redis** (optional; needed from Phase 5 for real-time)
+- **`frontend-cra/`**: User interface built with React (CRA), GSAP for premium animations, and Recharts for spending insights.
+- **`backend/`**: Node.js/Express API handling authentication, expense tracking, and database operations via Prisma.
 
 ---
 
-## Quick run
+## 🚀 Getting Started
 
-### 1. Backend
+### 1. Backend Setup
+1. `cd backend`
+2. `npm install`
+3. Create a `.env` file with your `DATABASE_URL` and `JWT_SECRET`.
+4. `npx prisma generate`
+5. `npm run dev` (Runs on http://localhost:4000)
 
-```bash
-cd backend
-npm install
-```
-
-- Copy `backend/.env.example` → `backend/.env`
-- Set `DATABASE_URL` to your Supabase pooled URL
-- Set `DIRECT_URL` to your Supabase direct DB URL (for Prisma migrations)
-
-```bash
-npm run prisma:migrate
-npm run start:dev
-```
-
-Backend runs at **http://localhost:3000**.
-
-### 2. Frontend
-
-In a **second terminal**:
-
-```bash
-cd frontend
-npm install
-```
-
-- Optional: copy `frontend/.env.local.example` → `frontend/.env.local` and set `NEXT_PUBLIC_API_URL=http://localhost:3000` if the API is on another host.
-
-```bash
-npm run dev
-```
-
-Frontend runs at **http://localhost:3001** (or 3000 if free).
+### 2. Frontend Setup
+1. `cd frontend-cra`
+2. `npm install`
+3. Create a `.env` file with `REACT_APP_API_URL=http://localhost:4000`.
+4. `npm start` (Runs on http://localhost:3000)
 
 ---
 
-## Summary
+## 🛠 Tech Stack
 
-| App      | Folder    | Command           | URL                    |
-|----------|-----------|-------------------|------------------------|
-| Backend  | `backend/` | `npm run start:dev` | http://localhost:3000  |
-| Frontend | `frontend/` | `npm run dev`     | http://localhost:3001 |
-
-Open the frontend URL in the browser; use “Go to Dashboard” from the home page.
-
-## Expense API (Phase 1 + 2)
-
-Backend now includes authenticated expense routes:
-
-- `GET /expenses`
-- `POST /expenses`
-- `PUT /expenses/:expenseId`
-- `PATCH /expenses/:expenseId/category`
-- `GET /expenses/summary`
-
-Categorization pipeline now supports:
-
-1. Merchant dictionary lookup (`merchant_category_map`)
-2. Rule-based fallback
-3. Optional AI/local fallback based on `CATEGORIZATION_MODE`
-
-Available modes:
-
-- `rules_only`
-- `rules_plus_openai` (default)
-- `rules_plus_local`
-- `rules_plus_local_then_openai`
+- **Frontend**: React, GSAP, Recharts, React Router.
+- **Backend API**: Node.js, Express.js, Prisma ORM.
+- **Database**: Supabase (PostgreSQL).
+- **Authentication**: JWT (Bearer tokens).
