@@ -24,7 +24,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
-            frontend/package-lock.json
+            frontend-cra/package-lock.json
 
       - name: Backend install + build
         run: npm ci && npm run build
@@ -32,7 +32,7 @@ jobs:
 
       - name: Frontend install + build
         run: npm ci && npm run build
-        working-directory: frontend
+        working-directory: frontend-cra
 
   migrate:
     name: Prisma Migrate (Production)
