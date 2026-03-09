@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(true);
-  const [summaryError, setSummaryError] = useState("");
+  const [summaryError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [expenseHistory, setExpenseHistory] = useState([]);
