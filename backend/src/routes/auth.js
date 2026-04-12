@@ -1,9 +1,38 @@
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { prisma } = require("../db");
-const { signToken } = require("../middleware/auth");
+const { signAccessToken, signRefreshToken, authMiddleware } = require("../middleware/auth");
+const { REFRESH_TOKEN_SECRET } = require("../config/secrets");
 
 const router = express.Router();
+
+const REFRESH_COOKIE = "fynix_refresh";
+const REFRESH_COOKIE_PATH = "/api/auth";
+const REFRESH_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+function refreshCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: REFRESH_MAX_MS,
+    path: REFRESH_COOKIE_PATH,
+  };
+}
+
+async function issueSession(res, userId) {
+  const accessToken = signAccessToken(userId);
+  const refreshToken = signRefreshToken(userId);
+  const expiresAt = new Date(Date.now() + REFRESH_MAX_MS);
+
+  await prisma.refreshToken.create({
+    data: { token: refreshToken, userId, expiresAt },
+  });
+
+  res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
+  return accessToken;
+}
 
 // POST /api/auth/register
 router.post("/register", async (req, res) => {
@@ -20,7 +49,7 @@ router.post("/register", async (req, res) => {
       return res.status(409).json({ message: "Email already registered" });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
       data: {
         email: email.trim().toLowerCase(),
@@ -29,10 +58,10 @@ router.post("/register", async (req, res) => {
       },
     });
 
-    const token = signToken(user.id);
+    const accessToken = await issueSession(res, user.id);
     res.status(201).json({
       user: { id: user.id, email: user.email, name: user.name },
-      token,
+      accessToken,
     });
   } catch (err) {
     res.status(500).json({ message: err.message || "Registration failed" });
@@ -59,31 +88,65 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const token = signToken(user.id);
+    const accessToken = await issueSession(res, user.id);
     res.json({
       user: { id: user.id, email: user.email, name: user.name },
-      token,
+      accessToken,
     });
   } catch (err) {
     res.status(500).json({ message: err.message || "Login failed" });
   }
 });
 
-// GET /api/auth/me
-router.get("/me", async (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "Access token required" });
-  try {
-    const jwt = require("jsonwebtoken");
-    const { JWT_SECRET } = require("../middleware/auth");
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
-    if (!user) return res.status(401).json({ message: "User not found" });
-    res.json({ user: { id: user.id, email: user.email, name: user.name } });
-  } catch {
-    res.status(401).json({ message: "Invalid or expired token" });
+// POST /api/auth/refresh
+router.post("/refresh", async (req, res) => {
+  const refreshToken = req.cookies[REFRESH_COOKIE];
+  if (!refreshToken) {
+    return res.status(401).json({ message: "No refresh token" });
   }
+
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    if (payload.type !== "refresh") {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const stored = await prisma.refreshToken.findFirst({
+      where: { token: refreshToken, userId: payload.userId },
+    });
+    if (!stored || stored.expiresAt < new Date()) {
+      if (stored) {
+        await prisma.refreshToken.delete({ where: { id: stored.id } });
+      }
+      return res.status(401).json({ message: "Invalid or expired refresh token" });
+    }
+
+    const newAccessToken = signAccessToken(payload.userId);
+    res.json({ accessToken: newAccessToken });
+  } catch {
+    res.status(401).json({ message: "Invalid or expired refresh token" });
+  }
+});
+
+// POST /api/auth/logout
+router.post("/logout", async (req, res) => {
+  const refreshToken = req.cookies[REFRESH_COOKIE];
+  if (refreshToken) {
+    await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
+  }
+  res.clearCookie(REFRESH_COOKIE, {
+    path: REFRESH_COOKIE_PATH,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+  res.json({ message: "Logged out" });
+});
+
+// GET /api/auth/me
+router.get("/me", authMiddleware, async (req, res) => {
+  const u = req.user;
+  res.json({ user: { id: u.id, email: u.email, name: u.name } });
 });
 
 module.exports = router;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, clearToken } from "../api";
+import { api, clearAccessToken } from "../api";
+import { useAuth } from "../context/AuthContext";
 import CategoryChart from "../components/CategoryChart";
 import "./Dashboard.css";
 
@@ -23,6 +24,7 @@ function formatDate(v) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [monthlyTotal, setMonthlyTotal] = useState(0);
   const [expenseCount, setExpenseCount] = useState(0);
   const [categoryData, setCategoryData] = useState([]);
@@ -64,7 +66,7 @@ export default function Dashboard() {
         const recent = await api.get("/api/expenses");
         if (mounted) setRecentExpenses(recent.slice(0, 5));
       } catch {
-        clearToken();
+        clearAccessToken();
         navigate("/login");
       } finally {
         if (mounted) { setIsCheckingSession(false); setIsLoadingSummary(false); }
@@ -76,8 +78,11 @@ export default function Dashboard() {
 
   async function handleLogout() {
     setIsLoggingOut(true);
-    clearToken();
-    navigate("/login");
+    try {
+      await logout();
+    } finally {
+      navigate("/login");
+    }
   }
 
   async function openHistory() {

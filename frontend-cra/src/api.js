@@ -1,23 +1,58 @@
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:4000";
 
-function getToken() {
-  return localStorage.getItem("fynix_token");
+let accessToken = null;
+
+export function setAccessToken(token) {
+  accessToken = token;
 }
 
-export function setToken(token) {
-  localStorage.setItem("fynix_token", token);
+export function clearAccessToken() {
+  accessToken = null;
 }
 
-export function clearToken() {
-  localStorage.removeItem("fynix_token");
+export function getAccessToken() {
+  return accessToken;
 }
 
-async function request(path, options = {}) {
-  const token = getToken();
+export async function refreshAccessToken() {
+  const res = await fetch(`${API_URL}/api/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Refresh failed");
+  accessToken = data.accessToken;
+  return data.accessToken;
+}
+
+async function request(path, options = {}, didRetry = false) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    credentials: "include",
+    headers,
+  });
+
+  const skipRefresh =
+    path === "/api/auth/refresh" ||
+    path === "/api/auth/login" ||
+    path === "/api/auth/register";
+
+  if (res.status === 401 && !didRetry && !skipRefresh) {
+    try {
+      await refreshAccessToken();
+      return request(path, options, true);
+    } catch {
+      clearAccessToken();
+      const err = new Error("Session expired");
+      err.code = "AUTH_EXPIRED";
+      throw err;
+    }
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.message || "Request failed");
   return data;

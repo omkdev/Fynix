@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, setToken } from "../api";
+import { useAuth } from "../context/AuthContext";
 import "./Auth.css";
 
 export default function Register() {
   const navigate = useNavigate();
+  const { register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,9 +22,7 @@ export default function Register() {
     }
     setIsLoading(true);
     try {
-      const data = await api.post("/api/auth/register", { name, email, password });
-      setToken(data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      await register(email, password, name);
       setStatus({ type: "success", message: "Account created. Redirecting..." });
       navigate("/dashboard");
     } catch (err) {

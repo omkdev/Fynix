@@ -6,7 +6,7 @@ import "./Landing.css";
 
 const trustPoints = [
   { title: "Privacy-first by design", description: "Your financial data stays focused on product value. No ad targeting or data selling." },
-  { title: "Secure session-based login", description: "Authentication uses email/password with JWT-based sessions." },
+  { title: "Secure session-based login", description: "Short-lived access tokens in memory and a revocable refresh token in an HttpOnly cookie." },
   { title: "No ads, no noise", description: "Fynix is built to improve money habits, not to distract users with promotions." },
 ];
 

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, setToken } from "../api";
+import { useAuth } from "../context/AuthContext";
 import "./Auth.css";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -15,9 +16,7 @@ export default function Login() {
     setStatus({ type: "", message: "" });
     setIsLoading(true);
     try {
-      const data = await api.post("/api/auth/login", { email, password });
-      setToken(data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      await login(email, password);
       setStatus({ type: "success", message: "Login successful. Redirecting..." });
       navigate("/dashboard");
     } catch (err) {

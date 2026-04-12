@@ -1,19 +1,21 @@
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../db");
-
-const JWT_SECRET = process.env.JWT_SECRET || "fynix-dev-secret-change-in-production";
+const { ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET } = require("../config/secrets");
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1];
+  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
     return res.status(401).json({ message: "Access token required" });
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    if (payload.type !== "access") {
+      return res.status(401).json({ message: "Invalid token type" });
+    }
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
     if (!user) return res.status(401).json({ message: "User not found" });
     req.user = user;
     next();
@@ -22,8 +24,16 @@ async function authMiddleware(req, res, next) {
   }
 }
 
-function signToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: "7d" });
+function signAccessToken(userId) {
+  return jwt.sign({ userId, type: "access" }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
 }
 
-module.exports = { authMiddleware, signToken, JWT_SECRET };
+function signRefreshToken(userId) {
+  return jwt.sign({ userId, type: "refresh" }, REFRESH_TOKEN_SECRET, { expiresIn: "7d" });
+}
+
+module.exports = {
+  authMiddleware,
+  signAccessToken,
+  signRefreshToken,
+};
