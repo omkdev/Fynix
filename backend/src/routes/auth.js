@@ -1,6 +1,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { OAuth2Client } = require("google-auth-library");
 const { prisma } = require("../db");
 const { signAccessToken, signRefreshToken, authMiddleware } = require("../middleware/auth");
 const { REFRESH_TOKEN_SECRET } = require("../config/secrets");
@@ -83,6 +84,10 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
+    if (!user.passwordHash) {
+      return res.status(401).json({ message: "This account uses Google sign-in." });
+    }
+
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) {
       return res.status(401).json({ message: "Invalid email or password" });
@@ -141,6 +146,53 @@ router.post("/logout", async (req, res) => {
     sameSite: "lax",
   });
   res.json({ message: "Logged out" });
+});
+
+// POST /api/auth/google — Google Identity Services (credential JWT)
+router.post("/google", async (req, res) => {
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(503).json({ message: "Google sign-in is not configured." });
+    }
+
+    const { credential } = req.body;
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({ message: "Missing Google credential." });
+    }
+
+    const oAuthClient = new OAuth2Client(clientId);
+    const ticket = await oAuthClient.verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return res.status(401).json({ message: "Google did not return an email." });
+    }
+    if (payload.email_verified === false) {
+      return res.status(401).json({ message: "Google email is not verified." });
+    }
+
+    const email = String(payload.email).trim().toLowerCase();
+    const name = payload.name ? String(payload.name).trim() : null;
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      user = await prisma.user.create({
+        data: { email, name, passwordHash: null },
+      });
+    }
+
+    const accessToken = await issueSession(res, user.id);
+    res.json({
+      user: { id: user.id, email: user.email, name: user.name },
+      accessToken,
+    });
+  } catch (err) {
+    console.error("Google auth error:", err.message);
+    res.status(401).json({ message: "Google sign-in failed. Try again." });
+  }
 });
 
 // GET /api/auth/me

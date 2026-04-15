@@ -14,7 +14,7 @@ datasource db {
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
-  passwordHash String   @map("password_hash")
+  passwordHash String?  @map("password_hash")
   name         String?
   isBlocked    Boolean  @default(false) @map("is_blocked")
   blockedAt    DateTime? @map("blocked_at")

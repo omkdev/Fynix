@@ -39,7 +39,8 @@ async function request(path, options = {}, didRetry = false) {
   const skipRefresh =
     path === "/api/auth/refresh" ||
     path === "/api/auth/login" ||
-    path === "/api/auth/register";
+    path === "/api/auth/register" ||
+    path === "/api/auth/google";
 
   if (res.status === 401 && !didRetry && !skipRefresh) {
     try {
